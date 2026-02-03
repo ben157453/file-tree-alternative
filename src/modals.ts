@@ -1,4 +1,4 @@
-import { Modal, App, TFolder, TAbstractFile, FuzzySuggestModal, MarkdownView } from 'obsidian';
+import { Modal, App, TFolder, TAbstractFile, FuzzySuggestModal, MarkdownView, Editor } from 'obsidian';
 import FileTreeAlternativePlugin from 'main';
 import { getFileCreateString, createNewMarkdownFile } from 'utils/newFile';
 import { OZFile } from 'utils/types';
@@ -58,12 +58,20 @@ export class VaultChangeModal extends Modal {
     file: TFolder | OZFile | TAbstractFile;
     action: Action;
     plugin: FileTreeAlternativePlugin;
+    sourceEditor: Editor | null = null;
 
     constructor(plugin: FileTreeAlternativePlugin, file: TFolder | OZFile | TAbstractFile, action: Action) {
         super(plugin.app);
         this.file = file;
         this.action = action;
         this.plugin = plugin;
+
+        if (action === 'create note') {
+            const activeView = plugin.app.workspace.getActiveViewOfType(MarkdownView);
+            if (activeView) {
+                this.sourceEditor = activeView.editor;
+            }
+        }
     }
 
     onOpen() {
@@ -155,12 +163,10 @@ export class VaultChangeModal extends Modal {
             } else if (this.action === 'create folder') {
                 this.app.vault.createFolder(this.file.path + '/' + newName);
             } else if (this.action === 'create note') {
-                const activeView = this.plugin.app.workspace.getActiveViewOfType(MarkdownView);
-                if (activeView) {
-                    const editor = activeView.editor;
-                    const cursor = editor.getCursor();
+                if (this.sourceEditor) {
+                    const cursor = this.sourceEditor.getCursor();
                     const linkText = `[[${newName}]]`;
-                    editor.replaceRange(linkText, cursor);
+                    this.sourceEditor.replaceRange(linkText, cursor);
                 }
                 await createNewMarkdownFile(
                     this.plugin,
