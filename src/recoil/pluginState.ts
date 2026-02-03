@@ -63,3 +63,16 @@ export const focusedFolder = atom({
     default: null as TFolder,
     dangerouslyAllowMutability: true,
 });
+
+export const searchSnippetsMap = atom({
+    key: 'fileTreeSearchSnippetsMap',
+    default: {} as {
+        [path: string]: {
+            lineNumber: number;
+            line: string;
+            matchStartIndex: number;
+            matchEndIndex: number;
+        }[];
+    },
+    dangerouslyAllowMutability: true,
+});

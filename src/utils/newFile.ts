@@ -1,7 +1,7 @@
 import FileTreeAlternativePlugin from 'main';
 import { stripIndents } from 'common-tags';
 import dayjs from 'dayjs';
-import { TFile, TFolder, App } from 'obsidian';
+import { TFile, TFolder, App, MarkdownView } from 'obsidian';
 import { eventTypes, OZFile } from 'utils/types';
 
 export const openFile = (props: { file: OZFile; app: App; newLeaf: boolean; leafBySplit?: boolean }) => {
@@ -14,6 +14,53 @@ export const openFile = (props: { file: OZFile; app: App; newLeaf: boolean; leaf
         focus: true,
     });
     leaf.openFile(fileToOpen as TFile, { eState: { focus: true } });
+};
+
+export const openFileWithSelection = async (params: {
+    app: App;
+    file: OZFile;
+    inNewLeaf?: boolean;
+    lineNumber: number;
+    matchStartIndex?: number;
+    matchEndIndex?: number;
+    highlightDurationMs?: number;
+}) => {
+    const { app, file, inNewLeaf, lineNumber, matchStartIndex, matchEndIndex, highlightDurationMs } = params;
+    let leaf = app.workspace.getMostRecentLeaf();
+    if (!leaf) return;
+    if (inNewLeaf || leaf.getViewState().pinned) {
+        leaf = app.workspace.getLeaf('tab');
+    }
+    const tf = app.vault.getAbstractFileByPath(file.path) as TFile;
+    if (!tf) return;
+    await leaf.openFile(tf);
+    const v = app.workspace.getActiveViewOfType(MarkdownView) || (leaf.view instanceof MarkdownView ? (leaf.view as MarkdownView) : null);
+    const editor = v && (v as any).editor ? (v as any).editor : undefined;
+    if (!editor) return;
+    const targetLine = Math.max(0, (lineNumber || 1) - 1);
+    if (typeof matchStartIndex === 'number' && typeof matchEndIndex === 'number' && matchStartIndex >= 0 && matchEndIndex >= matchStartIndex) {
+        editor.focus();
+        editor.setSelection({ line: targetLine, ch: matchStartIndex }, { line: targetLine, ch: matchEndIndex + 1 });
+        setTimeout(() => {
+            editor.setCursor({ line: targetLine, ch: matchEndIndex + 1 });
+            if (highlightDurationMs && highlightDurationMs > 0) {
+                setTimeout(() => {
+                    editor.setCursor({ line: targetLine, ch: matchEndIndex + 1 });
+                }, highlightDurationMs);
+            }
+        }, 50);
+        const maybeScroll = (editor as unknown as { scrollIntoView?: (range: { from: { line: number; ch: number }; to: { line: number; ch: number } }, center?: boolean) => void });
+        if (typeof maybeScroll.scrollIntoView === 'function') {
+            maybeScroll.scrollIntoView({ from: { line: targetLine, ch: 0 }, to: { line: targetLine, ch: 0 } }, true);
+        }
+    } else {
+        editor.focus();
+        editor.setCursor({ line: targetLine, ch: 0 });
+        const maybeScroll = (editor as unknown as { scrollIntoView?: (range: { from: { line: number; ch: number }; to: { line: number; ch: number } }, center?: boolean) => void });
+        if (typeof maybeScroll.scrollIntoView === 'function') {
+            maybeScroll.scrollIntoView({ from: { line: targetLine, ch: 0 }, to: { line: targetLine, ch: 0 } }, true);
+        }
+    }
 };
 
 export const getFileCreateString = (params: { plugin: FileTreeAlternativePlugin; fileName: string }): string => {

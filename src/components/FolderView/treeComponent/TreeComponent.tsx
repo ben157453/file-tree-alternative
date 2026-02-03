@@ -139,7 +139,7 @@ export default function Tree(props: TreeProps) {
             onDropAccepted={() => setHightlight(false)}
             onDropRejected={() => setHightlight(false)}>
             {({ getRootProps, getInputProps }) => (
-                <React.Fragment>
+                <div>
                     <div
                         style={{ ...props.style }}
                         className="treeview"
@@ -199,7 +199,7 @@ export default function Tree(props: TreeProps) {
                             {props.children}
                         </div>
                     )}
-                </React.Fragment>
+                </div>
             )}
         </Dropzone>
     );

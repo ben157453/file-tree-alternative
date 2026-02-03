@@ -9,7 +9,7 @@ import { useRecoilState } from 'recoil';
 import useForceUpdate from 'hooks/ForceUpdate';
 import useLongPress from 'hooks/useLongPress';
 import * as FileViewHandlers from 'components/FileView/handlers';
-import LazyLoad from 'react-lazy-load';
+import * as newFileUtils from 'utils/newFile';
 
 interface FilesProps {
     plugin: FileTreeAlternativePlugin;
@@ -28,9 +28,18 @@ export function FileComponent(props: FilesProps) {
     const [excludedFolders] = useRecoilState(recoilState.excludedFolders);
     const [showSubFolders, setShowSubFolders] = useRecoilState(recoilState.showSubFolders);
     const [focusedFolder, _setFocusedFolder] = useRecoilState(recoilState.focusedFolder);
+    const [searchSnippetsLocal, setSearchSnippetsLocal] = useState<{
+        [path: string]: {
+            lineNumber: number;
+            line: string;
+            matchStartIndex: number;
+            matchEndIndex: number;
+        }[];
+    }>({});
 
     // Local States
     const [highlight, setHighlight] = useState<boolean>(false);
+    const [searchMode, setSearchMode] = useState<'filename' | 'fulltext'>('fulltext');
     const [searchPhrase, setSearchPhrase] = useState<string>('');
     const [searchBoxVisible, setSearchBoxVisible] = useState<boolean>(false);
     const [treeHeader, setTreeHeader] = useState<string>(Util.getFolderName(activeFolderPath, plugin.app));
@@ -39,7 +48,11 @@ export function FileComponent(props: FilesProps) {
     const forceUpdate = useForceUpdate();
 
     // Folder Name Update once Active Folder Path Change
-    useEffect(() => setTreeHeader(Util.getFolderName(activeFolderPath, plugin.app)), [activeFolderPath]);
+    useEffect(() => {
+        setTreeHeader(Util.getFolderName(activeFolderPath, plugin.app));
+        setSearchPhrase('');
+        setSearchSnippetsLocal({});
+    }, [activeFolderPath]);
 
     // File List Update once showSubFolders change
     useEffect(() => {
@@ -51,6 +64,7 @@ export function FileComponent(props: FilesProps) {
                 excludedFolders: excludedFolders,
             })
         );
+        setSearchSnippetsLocal({});
     }, [showSubFolders, excludedExtensions, excludedFolders]);
 
     // To focus on Search box if visible set
@@ -86,6 +100,7 @@ export function FileComponent(props: FilesProps) {
                 excludedFolders: excludedFolders,
             })
         );
+        setSearchSnippetsLocal({});
     };
 
     const toggleShowSubFolders = async () => {
@@ -203,6 +218,8 @@ export function FileComponent(props: FilesProps) {
                                                     excludedExtensions,
                                                     excludedFolders,
                                                     focusedFolder,
+                                                    setSnippets: setSearchSnippetsLocal,
+                                                    searchMode,
                                                 });
                                             }}
                                             onKeyDown={(e) => {
@@ -212,6 +229,43 @@ export function FileComponent(props: FilesProps) {
                                                 }
                                             }}
                                         />
+                                        <div
+                                            className="oz-search-mode-toggle"
+                                            style={{
+                                                cursor: 'pointer',
+                                                marginLeft: '5px',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                height: '100%',
+                                                padding: '0 5px',
+                                                border: '1px solid var(--background-modifier-border)',
+                                                borderRadius: '4px',
+                                                fontSize: '10px',
+                                                minWidth: '40px',
+                                                backgroundColor: 'var(--background-secondary)',
+                                                color: 'var(--text-normal)'
+                                            }}
+                                            onClick={() => {
+                                                const newMode = searchMode === 'fulltext' ? 'filename' : 'fulltext';
+                                                setSearchMode(newMode);
+                                                // Trigger search with new mode immediately
+                                                FileViewHandlers.handleSearch({
+                                                    e: { target: { value: searchPhrase } } as any,
+                                                    plugin,
+                                                    activeFolderPath,
+                                                    setSearchPhrase,
+                                                    setTreeHeader,
+                                                    setOzFileList,
+                                                    excludedExtensions,
+                                                    excludedFolders,
+                                                    focusedFolder,
+                                                    setSnippets: setSearchSnippetsLocal,
+                                                    searchMode: newMode,
+                                                });
+                                            }}>
+                                            {searchMode === 'fulltext' ? 'TXT' : 'FILE'}
+                                        </div>
                                     </div>
                                 )}
 
@@ -230,9 +284,33 @@ export function FileComponent(props: FilesProps) {
                                 }`}>
                                 {filesToList.map((file, index) => {
                                     return (
-                                        <LazyLoad height={22} key={index}>
+                                        <div key={index}>
                                             <NavFile file={file} plugin={plugin} />
-                                        </LazyLoad>
+                                            {searchSnippetsLocal[file.path] && searchSnippetsLocal[file.path].length > 0 && (
+                                                <div className="oz-search-snippets">
+                                                    {searchSnippetsLocal[file.path].slice(0, 2).map((snip, si) => (
+                                                        <div
+                                                            key={`${file.path}-${snip.lineNumber}-${si}`}
+                                                            className="oz-search-snippet"
+                                                            onClick={(event) =>
+                                                                newFileUtils.openFileWithSelection({
+                                                                    app: plugin.app,
+                                                                    file,
+                                                                    inNewLeaf: event.ctrlKey || event.metaKey,
+                                                                    lineNumber: snip.lineNumber,
+                                                                    matchStartIndex: snip.matchStartIndex,
+                                                                    matchEndIndex: snip.matchEndIndex,
+                                                                    highlightDurationMs: 1500,
+                                                                })
+                                                            }>
+                                                            <span className="prefix">{snip.line.slice(0, snip.matchStartIndex)}</span>
+                                                            <span className="match">{snip.line.slice(snip.matchStartIndex, snip.matchEndIndex + 1)}</span>
+                                                            <span className="suffix">{snip.line.slice(snip.matchEndIndex + 1)}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
                                     );
                                 })}
                             </div>

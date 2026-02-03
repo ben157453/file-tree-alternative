@@ -1,4 +1,4 @@
-import { Modal, App, TFolder, TAbstractFile, FuzzySuggestModal } from 'obsidian';
+import { Modal, App, TFolder, TAbstractFile, FuzzySuggestModal, MarkdownView } from 'obsidian';
 import FileTreeAlternativePlugin from 'main';
 import { getFileCreateString, createNewMarkdownFile } from 'utils/newFile';
 import { OZFile } from 'utils/types';
@@ -104,8 +104,12 @@ export class VaultChangeModal extends Modal {
                 }
             }
         } else if (this.action === 'create note' || this.action === 'create folder') {
-            inputEl.value = 'Untitled';
-            inputEl.select();
+            if (this.action === 'create note') {
+                inputEl.value = 'sub_';
+            } else {
+                inputEl.value = 'Untitled';
+                inputEl.select();
+            }
         }
 
         inputEl.focus();
@@ -151,6 +155,13 @@ export class VaultChangeModal extends Modal {
             } else if (this.action === 'create folder') {
                 this.app.vault.createFolder(this.file.path + '/' + newName);
             } else if (this.action === 'create note') {
+                const activeView = this.plugin.app.workspace.getActiveViewOfType(MarkdownView);
+                if (activeView) {
+                    const editor = activeView.editor;
+                    const cursor = editor.getCursor();
+                    const linkText = `[[${newName}]]`;
+                    editor.replaceRange(linkText, cursor);
+                }
                 await createNewMarkdownFile(
                     this.plugin,
                     this.file as TFolder,

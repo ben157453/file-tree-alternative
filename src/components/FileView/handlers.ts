@@ -2,7 +2,7 @@ import FileTreeAlternativePlugin from 'main';
 import { VaultChangeModal, MoveSuggestionModal, ConfirmationModal } from 'modals';
 import { OZFile, eventTypes } from 'utils/types';
 import * as Util from 'utils/Utils';
-import { TFile, TFolder } from 'obsidian';
+import { TFile, TFolder, debounce } from 'obsidian';
 import * as newFileUtils from 'utils/newFile';
 import { SetterOrUpdater } from 'recoil';
 import * as Icons from 'utils/icons';
@@ -72,18 +72,17 @@ const getFileTags = (params: { f: OZFile; plugin: FileTreeAlternativePlugin }): 
 const getFilesWithTag = (params: {
     searchTag: string;
     plugin: FileTreeAlternativePlugin;
-    focusedFolder: TFolder;
+    searchFolderPath: string;
     excludedExtensions: string[];
     excludedFolders: string[];
 }): Set<OZFile> => {
-    let { searchTag, plugin, focusedFolder, excludedExtensions, excludedFolders } = params;
+    let { searchTag, plugin, searchFolderPath, excludedExtensions, excludedFolders } = params;
     let filesWithTag: Set<OZFile> = new Set();
     let ozFiles = Util.getFilesUnderPath({
-        path: plugin.settings.allSearchOnlyInFocusedFolder ? focusedFolder.path : '/',
+        path: searchFolderPath,
         plugin: plugin,
         excludedExtensions: excludedExtensions,
         excludedFolders: excludedFolders,
-        getAllFiles: true,
     });
     for (let ozFile of ozFiles) {
         let fileTags = getFileTags({
@@ -183,10 +182,92 @@ export const sortFileListClickHandle = (params: { e: React.MouseEvent; plugin: F
 };
 
 // Search Function
-const searchAllRegex = new RegExp('all:(.*)?');
 const searchTagRegex = new RegExp('tag:(.*)?');
+
+type SnippetsSetter = (snippets: {
+    [path: string]: {
+        lineNumber: number;
+        line: string;
+        matchStartIndex: number;
+        matchEndIndex: number;
+    }[];
+}) => void;
+
+const searchByContentDebounced = debounce(
+    async (params: {
+        query: string;
+        searchFolder: string;
+        plugin: FileTreeAlternativePlugin;
+        excludedExtensions: string[];
+        excludedFolders: string[];
+        setOzFileList: SetterOrUpdater<OZFile[]>;
+        setSnippets: SnippetsSetter;
+    }) => {
+        const { query, searchFolder, plugin, excludedExtensions, excludedFolders, setOzFileList, setSnippets } = params;
+        const q = (query || '').trim();
+        if (!q) {
+            setOzFileList([]);
+            setSnippets({});
+            return;
+        }
+        const ozFiles = Util.getFilesUnderPath({
+            path: searchFolder,
+            plugin,
+            excludedExtensions,
+            excludedFolders,
+        });
+        const results: OZFile[] = [];
+        const lowerQ = q.toLowerCase();
+        const snippets: {
+            [path: string]: {
+                lineNumber: number;
+                line: string;
+                matchStartIndex: number;
+                matchEndIndex: number;
+            }[];
+        } = {};
+        for (const oz of ozFiles) {
+            if (oz.extension !== 'md') continue;
+            const tf = plugin.app.vault.getAbstractFileByPath(oz.path) as TFile;
+            if (!tf) continue;
+            const contents = await plugin.app.vault.read(tf);
+            const lower = contents.toLowerCase();
+            if (!lower.includes(lowerQ)) continue;
+            results.push(oz);
+            const lines = contents.split(/\r?\n|\r|\n/g);
+            const fileSnips: {
+                lineNumber: number;
+                line: string;
+                matchStartIndex: number;
+                matchEndIndex: number;
+            }[] = [];
+            for (let i = 0; i < lines.length && fileSnips.length < 2; i++) {
+                const line = lines[i];
+                const idx = line.toLowerCase().indexOf(lowerQ);
+                if (idx >= 0) {
+                    fileSnips.push({
+                        lineNumber: i + 1,
+                        line,
+                        matchStartIndex: idx,
+                        matchEndIndex: idx + q.length - 1,
+                    });
+                }
+            }
+            if (fileSnips.length) snippets[oz.path] = fileSnips;
+        }
+        const limited = results.slice(0, 100);
+        const limitedSnips: typeof snippets = {};
+        for (const r of limited) {
+            if (snippets[r.path]) limitedSnips[r.path] = snippets[r.path];
+        }
+        setOzFileList(limited);
+        setSnippets(limitedSnips);
+    },
+    250,
+    true
+);
 export const handleSearch = (params: {
-    e: React.ChangeEvent<HTMLInputElement>;
+    e: React.ChangeEvent<HTMLInputElement> | { target: { value: string } };
     activeFolderPath: string;
     setSearchPhrase: React.Dispatch<React.SetStateAction<string>>;
     setTreeHeader: React.Dispatch<React.SetStateAction<string>>;
@@ -195,11 +276,13 @@ export const handleSearch = (params: {
     excludedFolders: string[];
     plugin: FileTreeAlternativePlugin;
     focusedFolder: TFolder;
+    setSnippets: SnippetsSetter;
+    searchMode?: 'fulltext' | 'filename';
 }) => {
-    let { e, activeFolderPath, setSearchPhrase, setOzFileList, setTreeHeader, plugin, focusedFolder, excludedExtensions, excludedFolders } = params;
+    let { e, activeFolderPath, setSearchPhrase, setOzFileList, setTreeHeader, plugin, focusedFolder, excludedExtensions, excludedFolders, setSnippets, searchMode } = params;
     var searchPhrase = e.target.value;
     setSearchPhrase(searchPhrase);
-    var searchFolder = activeFolderPath;
+    const searchFolder = activeFolderPath;
 
     // Check Tag Regex in Search Phrase
     let tagRegexMatch = searchPhrase.match(searchTagRegex);
@@ -207,40 +290,62 @@ export const handleSearch = (params: {
         setTreeHeader('Files with Tag');
         if (tagRegexMatch[1] === undefined || tagRegexMatch[1].replace(/\s/g, '').length === 0) {
             setOzFileList([]);
+            setSnippets({});
             return;
         }
         setOzFileList([
             ...getFilesWithTag({
                 searchTag: tagRegexMatch[1],
                 plugin: plugin,
-                focusedFolder: focusedFolder,
+                searchFolderPath: searchFolder,
                 excludedExtensions: excludedExtensions,
                 excludedFolders: excludedFolders,
             }),
         ]);
+        setSnippets({});
         return;
     }
 
-    // Check All Regex in Search Phrase
-    let allRegexMatch = searchPhrase.match(searchAllRegex);
-    if (allRegexMatch) {
-        searchPhrase = allRegexMatch[1] ? allRegexMatch[1] : '';
-        searchFolder = plugin.settings.allSearchOnlyInFocusedFolder ? focusedFolder.path : '/';
-        setTreeHeader('All Files');
-    } else {
+    // Default: Full-text search within current folder scope
+    if (!searchPhrase || searchPhrase.trim().length === 0) {
         setTreeHeader(Util.getFolderName(activeFolderPath, plugin.app));
+        setOzFileList(
+            Util.getFilesUnderPath({
+                path: searchFolder,
+                plugin,
+                excludedExtensions,
+                excludedFolders,
+            })
+        );
+        setSnippets({});
+        return;
     }
 
-    let getAllFiles = allRegexMatch ? true : false;
-    let filteredFiles = getFilesWithName({
-        searchPhrase,
+    if (searchMode === 'filename') {
+        setTreeHeader('Filename Search');
+        setOzFileList(
+            getFilesWithName({
+                searchPhrase,
+                searchFolder,
+                plugin,
+                excludedExtensions,
+                excludedFolders,
+            })
+        );
+        setSnippets({});
+        return;
+    }
+
+    setTreeHeader('Content Search');
+    searchByContentDebounced({
+        query: searchPhrase,
         searchFolder,
         plugin,
         excludedExtensions,
         excludedFolders,
-        getAllFiles,
+        setOzFileList,
+        setSnippets,
     });
-    setOzFileList(filteredFiles);
 };
 
 // ----> NAV FILE COMPONENT HANDLERS <----- \\

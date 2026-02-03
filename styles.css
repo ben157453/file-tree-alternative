@@ -533,3 +533,19 @@ svg.oz-folder-toggle path {
 .is-mobile .oz-nav-action-button svg {
     transform: scale(1.2);
 }
+
+.oz-search-snippets {
+    padding-left: 22px;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+.oz-search-snippet {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+}
+.oz-search-snippet .match {
+    background-color: rgba(255, 215, 0, 0.45);
+    color: var(--text-normal);
+}
